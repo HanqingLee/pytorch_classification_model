@@ -38,6 +38,14 @@ def main():
     args = arg_parser.parse_args()
     args.config_of_data = config.datasets[args.data]
     args.num_classes = config.datasets[args.data]['num_classes']
+
+    # limit the gpu id to use
+    # WARNING: This assignment should be down at the beginning, in case of different assignment for different parts
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
+    gpu_id = []
+    for i in range(len(args.gpu_id.split(','))):
+        gpu_id.append(i)
+
     if configure is None:
         args.tensorboard = False
         print(Fore.RED +
@@ -56,14 +64,15 @@ def main():
             if args.start_epoch <= 0:
                 args.start_epoch = checkpoint['epoch'] + 1
             best_epoch = args.start_epoch - 1
+            print('Epoch recovered:%d' % checkpoint['epoch'])
             best_acc = checkpoint['best_acc']
             for name in arch_resume_names:
                 if name in vars(args) and name in vars(old_args):
                     setattr(args, name, getattr(old_args, name))
 
             model = getModel(**vars(args))
-            os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-            model = torch.nn.DataParallel(model, device_ids=[0, 1]).cuda()
+            # os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
+            model = torch.nn.DataParallel(model, device_ids=gpu_id).cuda()
 
             model.load_state_dict(checkpoint['state_dict'])
             print("=> loaded checkpoint '{}'"
@@ -81,8 +90,9 @@ def main():
         print("=> creating model '{}'".format(args.arch))
         model = getModel(**vars(args))
         model = load_pretrained_diff_parameter(model, args.pretrain)
-        os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-        model = torch.nn.DataParallel(model, device_ids=[0, 1]).cuda()
+
+
+        model = torch.nn.DataParallel(model, device_ids=gpu_id).cuda()
         print("=> pre-train weights loaded")
     else:
         # create model
@@ -104,17 +114,17 @@ def main():
     trainer = Trainer(model, criterion, optimizer, args)
 
     # create dataloader
-    if args.evaluate == 'train':
+    if args.eval == 'train':
         train_loader, _, _ = getDataloaders(args.data,
                                             splits=('train'), batch_size=args.batch_size)
         trainer.test(train_loader, best_epoch)
         return
-    elif args.evaluate == 'val':
+    elif args.eval == 'val':
         _, val_loader, _ = getDataloaders(args.data,
                                           splits=('val'), batch_size=args.batch_size)
         trainer.test(val_loader, best_epoch)
         return
-    elif args.evaluate == 'test':
+    elif args.eval == 'test':
         _, _, test_loader = getDataloaders(args.data, splits=('test'), batch_size=args.batch_size)
         trainer.test(test_loader, best_epoch)
         return
@@ -136,14 +146,13 @@ def main():
 
     log_print('args:')
     log_print(args)
-    print('model:', file=f_log)
-    print(model, file=f_log)
+    # print('model:', file=f_log)
+    # print(model, file=f_log)
+    f_log.flush()
     log_print('# of params:',
               str(sum([p.numel() for p in model.parameters()])))
-    f_log.flush()
+
     torch.save(args, os.path.join(args.save, 'args.pth'))
-    scores = ['epoch\tlr\ttrain_loss\tval_loss\ttrain_err1'
-              '\tval_err1\ttrain_err5\tval_err']
     if args.tensorboard:
         configure(args.save, flush_secs=5)
 
@@ -159,7 +168,7 @@ def main():
             log_value('train_acc', train_acc, epoch)
 
         # evaluate on validation set
-        val_loss, val_acc, recall, precision, f1 = trainer.test(val_loader, epoch)
+        val_loss, val_acc, recall, precision, f1, acc = trainer.test(val_loader, epoch, silence=True)
 
         if args.tensorboard:
             log_value('val_loss', val_loss, epoch)
@@ -179,29 +188,41 @@ def main():
                     log_value('cls_' + str(i) + '_f1', f1[i], epoch)
                 except:
                     log_value('cls_' + str(i) + '_f1', 0, epoch)
+                try:
+                    log_value('cls_' + str(i) + 'acc', acc[i], epoch)
+                except:
+                    log_value('cls_' + str(i) + 'acc', 0, epoch)
 
         # save scores to a tsv file, rewrite the whole file to prevent
         # accidental deletion
-        scores.append(('{}\t{}' + '\t{:.4f}' * 2)
-                      .format(epoch, lr, train_loss, val_loss,
-                              train_acc, val_acc))
+        print(('epoch:{}\tlr:{}\ttrain_loss:{:.4f}\ttrain_acc:{:.4f}\tval_loss:{:.4f}\tval_acc:{:.4f}')
+                      .format(epoch, lr, train_loss,train_acc, val_loss, val_acc), file=f_log)
         for i in range(args.num_classes):
             try:
-                scores.append(('\nf1 for class {}: {:.4f}')
-                              .format(i, f1[i]))
+                print(('cls_{}_recall: {:.4f}').format(i, recall[i]), file=f_log)
             except:
-                scores.append(('\nf1 for class {}: {:.4f}')
-                              .format(i, 0))
-        with open(os.path.join(args.save, 'scores.tsv'), 'w') as f:
-            print('\n'.join(scores), file=f)
+                print(('cls_{}_recall: {:.4f}').format(i, 0), file=f_log)
+            try:
+                print(('cls_{}_precision: {:.4f}').format(i, precision[i]), file=f_log)
+            except:
+                print(('cls_{}_precision: {:.4f}').format(i, 0), file=f_log)
+            try:
+                print(('cls_{}_f1: {:.4f}').format(i, f1[i]), file=f_log)
+            except:
+                print(('cls_{}_f1: {:.4f}').format(i, 0), file=f_log)
+            try:
+                print(('cls_{}_acc: {:.4f}').format(i, acc[i]), file=f_log)
+            except:
+                print(('cls_{}_acc: {:.4f}').format(i, 0), file=f_log)
+        f_log.flush()
 
         # remember best err@1 and save checkpoint
         is_best = val_acc > best_acc
         if is_best:
             best_acc = val_acc
             best_epoch = epoch
-            print(Fore.GREEN + 'Best var_acc {}'.format(best_acc) +
-                  Fore.RESET)
+            print(Fore.GREEN + 'Best var_acc {}'.format(best_acc) + Fore.RESET, file=f_log)
+        f_log.flush()
 
         dict = {
             'args': args,
@@ -211,11 +232,10 @@ def main():
             'state_dict': model.state_dict(),
             'best_acc': best_acc,
         }
-        save_checkpoint(dict, is_best, args.save, filename='checkpoint_'+str(epoch) + '.pth.tar')
+        save_checkpoint(dict, is_best, args.save, filename='checkpoint_' + str(epoch) + '.pth.tar')
         if not is_best and epoch - best_epoch >= args.patience > 0:
             break
-    print('Best best_acc: {:.4f} at epoch {}'.format(best_acc, best_epoch))
-
+    print('Best best_acc: {:.4f} at epoch {}'.format(best_acc, best_epoch), file=f_log)
 
 if __name__ == '__main__':
     main()
