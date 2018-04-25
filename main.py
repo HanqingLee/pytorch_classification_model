@@ -71,8 +71,6 @@ def main():
                     setattr(args, name, getattr(old_args, name))
 
             model = getModel(**vars(args))
-            # os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
-            model = torch.nn.DataParallel(model, device_ids=gpu_id).cuda()
 
             model.load_state_dict(checkpoint['state_dict'])
             print("=> loaded checkpoint '{}'"
@@ -91,13 +89,13 @@ def main():
         model = getModel(**vars(args))
         model = load_pretrained_diff_parameter(model, args.pretrain)
 
-
-        model = torch.nn.DataParallel(model, device_ids=gpu_id).cuda()
         print("=> pre-train weights loaded")
     else:
         # create model
         print("=> creating model '{}'".format(args.arch))
         model = getModel(**vars(args))
+
+    model = torch.nn.DataParallel(model, device_ids=gpu_id).cuda()
 
     cudnn.benchmark = True
 
@@ -229,9 +227,11 @@ def main():
             'epoch': epoch,
             'best_epoch': best_epoch,
             'arch': args.arch,
-            'state_dict': model.state_dict(),
+            'state_dict': model.module.state_dict(),
             'best_acc': best_acc,
         }
+        # state_dict: model.state_dict() will add "module" layer in front of every model. The reading of this kind of
+        # checkpoint requires to initialize model with DataParallel before resuming.
         save_checkpoint(dict, is_best, args.save, filename='checkpoint_' + str(epoch) + '.pth.tar')
         if not is_best and epoch - best_epoch >= args.patience > 0:
             break
