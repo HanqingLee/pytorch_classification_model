@@ -23,10 +23,12 @@ exp_group.add_argument('--resume', default='', type=str, metavar='PATH',
 exp_group.add_argument('--pretrain', default='', type=str, metavar='PATH',
                        help='path to pretrained model (default: none)')
 
-exp_group.add_argument('--eval', '--evaluate', dest='evaluate', default='',
+exp_group.add_argument('--eval', '--evaluate', default='',
                        choices=['', 'train', 'val', 'test'],
                        help='eval mode: evaluate model on train/val/test set'
                        ' (default: \'\' i.e. training mode)')
+exp_group.add_argument('--gpu_id', default='2,3', help='the id of gpu to use')
+
 exp_group.add_argument('-f', '--force', dest='force', action='store_true',
                        help='force to overwrite existing save path')
 exp_group.add_argument('--print-freq', '-p', default=100, type=int,
@@ -53,12 +55,11 @@ data_group.add_argument('-j', '--workers', dest='num_workers', default=4,
                         help='number of data loading workers (default: 4)')
 data_group.add_argument('--normalized', action='store_true',
                         help='normalize the data into zero mean and unit std')
-
 # model arch related
 arch_group = arg_parser.add_argument_group('arch',
                                            'model architecture setting')
 arch_group.add_argument('--arch', '-a', metavar='ARCH', default='DualPathNet',
-                        type=str, choices=model_names,
+                        type=str,
                         help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: rop_4cls)')
@@ -99,13 +100,15 @@ optim_group.add_argument('--patience', default=0, type=int, metavar='N',
                          '(0 means no early stopping)')
 optim_group.add_argument('-b', '--batch_size', default=32, type=int,
                          metavar='N', help='mini-batch size (default: 64)')
+optim_group.add_argument('--freeze', default=0, type=int,
+                         help='layers of network to freeze')
 optim_group.add_argument('--optimizer', default='sgd',
                          choices=['sgd', 'rmsprop', 'adam'], metavar='N',
                          help='optimizer (default=sgd)')
 optim_group.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                          metavar='LR',
                          help='initial learning rate (default: 0.1)')
-optim_group.add_argument('--decay_rate', default=0.1, type=float, metavar='N',
+optim_group.add_argument('--decay_rate', default=0.5, type=float, metavar='N',
                          help='decay rate of learning rate (default: 0.1)')
 optim_group.add_argument('--momentum', default=0.9, type=float, metavar='M',
                          help='momentum (default=0.9)')

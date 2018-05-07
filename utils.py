@@ -15,9 +15,7 @@ def create_save_folder(save_path, force=False, ignore_patterns=[]):
             # if ans not in ('y', 'Y', 'yes', 'Yes'):
             #     os.exit(1)
         from getpass import getuser
-        tmp_path = '/tmp/{}-experiments/{}_{}'.format(getuser(),
-                                                      os.path.basename(save_path),
-                                                      time.time())
+        tmp_path = '{}_old_{}'.format(save_path, time.time())
         print('move existing {} to {}'.format(save_path, Fore.RED
                                               + tmp_path + Fore.RESET))
         shutil.copytree(save_path, tmp_path)
@@ -46,12 +44,16 @@ def load_pretrained_diff_parameter(model, model_path):
     return model
 
 def adjust_learning_rate(optimizer, lr_init, decay_rate, epoch, num_epochs):
-    """Decay Learning rate at 1/2 and 3/4 of the num_epochs"""
+    # """Decay Learning rate at 1/2 and 3/4 of the num_epochs"""
     lr = lr_init
-    if epoch >= num_epochs * 0.75:
-        lr *= decay_rate ** 2
-    elif epoch >= num_epochs * 0.5:
-        lr *= decay_rate
+    iter_decay = int(epoch / (num_epochs * 0.2))
+    lr *= decay_rate ** iter_decay
+    # if epoch / num_epochs * 0.2:
+    #     lr *= decay_rate
+    # elif epoch >= num_epochs * 0.5:
+    #     lr *= decay_rate
+    # elif epoch >= num_epochs * 0.25:
+    #     lr *= decay_rate
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
     return lr
@@ -69,7 +71,7 @@ def get_optimizer(model, args):
     sys.path.insert(0, '/home/ubuntu/skin_demo/RoP/AMSGrad/')
 
     if args.optimizer == 'sgd':
-        return torch.optim.SGD(model.parameters(), args.lr,
+        return torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), args.lr,
                                momentum=args.momentum, nesterov=args.nesterov,
                                weight_decay=args.weight_decay)
     elif args.optimizer == 'rmsprop':
@@ -77,8 +79,8 @@ def get_optimizer(model, args):
                                    alpha=args.alpha,
                                    weight_decay=args.weight_decay)
     elif args.optimizer == 'adam':
-        return torch.optim.Adam(model.parameters(), args.lr,
-                                beta=(args.beta1, args.beta2),
+        return torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), args.lr,
+                                # beta=(args.beta1, args.beta2),
                                 weight_decay=args.weight_decay)
 
     elif args.optimizer == 'adam_1':
@@ -110,10 +112,10 @@ class AverageMeter(object):
         self.reset()
 
     def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
+        self.val = 0.
+        self.avg = 0.
+        self.sum = 0.
+        self.count = 0.
 
     def update(self, val, n=1):
         self.val = val
@@ -137,6 +139,10 @@ def error(output, target, topk=(1,)):
         res.append(100.0 - correct_k.mul_(100.0 / batch_size))
     return res
 
+def get_correct_num(output, target):
+    _, predict = torch.max(output, dim=1)
+    train_correct = (predict.data == target.data).sum()
+    return train_correct
 
 def get_accuracy(output, target):
     _, predict = torch.max(output, dim=1)
@@ -147,7 +153,6 @@ def get_accuracy(output, target):
 
 def get_TF_table(output, target):
     labels = dict()
-    test = {'a':0, 'b':1}
     for i in range(len(target)):
         if target.data[i] not in labels:
             labels[target.data[i]] = [0, 0, 0, 0]  # TP_num, FP_num, FN_num, TN_num
@@ -215,3 +220,19 @@ def f1_value(output, target):
         except:
             f1_list[key] = None
     return f1_list
+
+def acc_value(output, target):
+    labels = get_TF_table(output, target)
+    f1_list = {}
+    for key in labels:
+        try:
+            TF_list = labels[key]
+            TP = float(TF_list[0])
+            FN = float(TF_list[2])
+            FP = float(TF_list[1])
+            TN = float(TF_list[3])
+            f1_list[key] = float((TP + TN) / (TP + TN + FN + FP))
+        except:
+            f1_list[key] = None
+    return f1_list
+
